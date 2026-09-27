@@ -140,6 +140,128 @@ The-Web-Chronicles/
 
 ---
 
+## 🌐 Playing in the Browser
+
+The Windows/Visual Studio build above is untouched and still works exactly as
+before. Alongside it, this repo also builds to WebAssembly so the game runs
+directly in a desktop browser tab — no install, no plugin.
+
+### 1. Install Emscripten (one-time)
+
+The Emscripten SDK is *not* committed to this repo. Clone it as a sibling
+directory (one level above this repo) and activate the latest release:
+
+```bash
+git clone https://github.com/emscripten-core/emsdk.git ../emsdk
+cd ../emsdk
+./emsdk install latest
+./emsdk activate latest
+cd ../The-Web-Chronicles
+```
+
+> **Windows note:** if `python` on your PATH is the Microsoft Store stub
+> ("Python was not found..."), `emsdk_env.sh` in this repo works around that
+> by explicitly prepending a real Python install to PATH before adding
+> Emscripten's own tools. Edit the `REAL_PYTHON_DIR` line in `emsdk_env.sh` if
+> your real Python lives somewhere else.
+
+### 2. Activate the Emscripten environment
+
+Every new shell needs this once, before building:
+
+```bash
+source emsdk_env.sh
+```
+
+This puts `emcc`/`em++` and a working Node.js on `PATH` for that shell. Verify with:
+
+```bash
+emcc --version
+```
+
+### 3. Build the web version
+
+```bash
+./build-web.sh
+```
+
+This compiles `Main/iMain.cpp` (which pulls in every other `.h` file
+unchanged) straight to WebAssembly, using Emscripten's `LEGACY_GL_EMULATION`
+to keep the game's original immediate-mode OpenGL (`glBegin`/`glVertex`/
+`glTexCoord`/etc.) working, and preloads every asset under `Main/` into the
+compiled app's virtual filesystem so all the existing `iLoadImage(...)` calls
+resolve unchanged.
+
+**Output:** `web/dist/` — `index.html`, `game.js`, `game.wasm`, `game.data`.
+This directory is a complete, self-contained static site.
+
+### 4. Run it locally
+
+WASM needs to be served over HTTP — opening `index.html` directly with
+`file://` will not work. From `web/dist/`, run any static file server, e.g.:
+
+```bash
+cd web/dist
+npx http-server -p 8080
+# or: python -m http.server 8080
+```
+
+Then open **http://localhost:8080/** in Chrome, Firefox, or Edge.
+
+### 5. Deploy to Vercel
+
+The repo includes `vercel.json`, which rewrites `/game` and `/game/` to the
+built site and sets the correct MIME/cache headers for `.wasm`/`.data`.
+
+```bash
+vercel deploy
+```
+
+No serverless functions are needed — it's a static deployment.
+
+### 6. Deploy to Netlify
+
+The repo includes `netlify.toml` (`publish = "web/dist"`, plus the same
+`/game` redirect and MIME/cache headers).
+
+```bash
+netlify deploy --prod
+```
+
+### Controls (same as the Windows build)
+
+| Key | Action |
+|:---:|---|
+| `A` / `D` | Move |
+| `Space` | Jump |
+| `1` / `2` / `3` / `4` | Punch / Kick / Ultimate / Block |
+| `X` | Fire |
+| `Enter` | Start / Confirm |
+| `Z` | Menu |
+| `Insert` | Select |
+| `↑` / `↓` | Navigate menu |
+| `Fullscreen` button on the page | Toggle fullscreen (Esc to exit) |
+
+### Known limitations
+
+- **No audio.** The original engine (`iGraphics.h`) has no sound API at all —
+  there is nothing to port. This is unchanged from the Windows build.
+- **Desktop only.** Keyboard controls are the only input method; touch/mobile
+  is not supported (a documented, intentional scope limit, not a bug).
+- **~85 MB download on first load.** Nearly all of that is the game's own
+  PNG/JPG/BMP sprite sheets and backgrounds, preloaded up front so gameplay
+  never stalls on an asset fetch. It's cached by the browser after first load.
+  Compressing/re-encoding those source assets would shrink this further but
+  was out of scope for the port itself.
+- **High scores are per-browser.** They persist across refreshes via
+  IndexedDB (`FS.mount(IDBFS, ...)` at `/persist`), but don't sync between
+  different browsers/devices — there's no backend.
+- Background art is stretched to fill the full 1600×700 canvas exactly like
+  the original Windows build does (`iShowImage` always stretches to the given
+  width/height); this is original behavior, not a web-porting artifact.
+
+---
+
 ## 🛠️ Built With
 
 - **C++** — Core game logic

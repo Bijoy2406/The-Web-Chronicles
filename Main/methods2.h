@@ -318,7 +318,7 @@ void webMovement2()
 void setAll2()
 {
 	int sum2 = 0;
-	for (int i = 0; i < 4; i++)
+	for (int i = 0; i < n2; i++)
 	{
 		mainbg2[i].y2 = 0;
 		mainbg2[i].x2 = sum2;
@@ -476,8 +476,8 @@ void rhinoImages()
 	rhinoRun2[6] = iLoadImage("rhi\\rhinoRunLeft\\image_6.png");
 	rhinoRun2[7] = iLoadImage("rhi\\rhinoRunLeft\\image_7.png");
 	rhinoRun2[8] = iLoadImage("rhi\\rhinoRunLeft\\image_8.png");
-	rhinoRun2[9] = iLoadImage("rhi\\rhinoRunRLeft\\image_9.png");
-	rhinoRun2[10] = iLoadImage("rhi\\rhinoRunRLeft\\image_10.png");
+	rhinoRun2[9] = iLoadImage("rhi\\rhinoRunLeft\\image_9.png");
+	rhinoRun2[10] = iLoadImage("rhi\\rhinoRunLeft\\image_10.png");
 
 	//snippets for rhinojumping
 	rhinoJump2[0] = iLoadImage("rhi\\rjump\\rj1.png");

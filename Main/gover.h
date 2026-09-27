@@ -1,5 +1,8 @@
 int sequence[20];
-int index;
+// Named dieIndex (not "index") because glibc/Emscripten's <strings.h> declares
+// a libc function char *index(const char*, int) at global scope; MSVC's CRT
+// has no such symbol so the original name only ever clashed on the web build.
+int dieIndex;
 
 void callback()
 {

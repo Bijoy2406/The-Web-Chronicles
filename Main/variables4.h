@@ -12,6 +12,10 @@ int t24;
 #define bgSpeed4 5
 #define n4 5
 int bg4[n4];
+// Snapshot of bg4, taken right after kravenImages() loads it (see main() in
+// iMain.cpp); the draw loop in iDraw() reads this instead of bg4 directly.
+// See the comment there for why.
+int bg4Snapshot[n4];
 struct background4
 {
 	int x4;

@@ -408,10 +408,10 @@ void setFireVariables()
 void checkCollision()
 {
 	//for video
-	index++;
-	if (index >= 20)
+	dieIndex++;
+	if (dieIndex >= 20)
 	{
-		index = 0;
+		dieIndex = 0;
 	}
 	
 	//for thug1
@@ -2392,9 +2392,9 @@ void titleButtons()
 	//Buttons for main menu
 	buttons[0] = iLoadImage("Buttons\\start.png");
 	buttons[1] = iLoadImage("Buttons\\story.png");
-	buttons[2] = iLoadImage("buttons\\howtoplay.png");
-	buttons[3] = iLoadImage("buttons\\highscores.png");
-	buttons[4] = iLoadImage("buttons\\credits.png");
+	buttons[2] = iLoadImage("Buttons\\howtoplay.png");
+	buttons[3] = iLoadImage("Buttons\\highscores.png");
+	buttons[4] = iLoadImage("Buttons\\credits.png");
 
 	//Image for instructions page
 	inst = iLoadImage("Title\\instructions_page (1).png");

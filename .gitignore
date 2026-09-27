@@ -1,0 +1,19 @@
+# Web/WebAssembly build output: game.js/wasm/data ARE committed (Netlify
+# has no Linux emsdk toolchain to rebuild them from source), so only the
+# separate debug symbols file (never produced by the current build-web.sh
+# flags) stays ignored here.
+web/dist/game.js.symbols
+
+# Native Linux (GCC/G++ + FreeGLUT) build artifact, produced by `make`
+Main/TheWebChronicles
+
+# Visual Studio / Windows build artifacts
+Debug/
+Main/Debug/
+*.sdf
+*.suo
+*.ilk
+*.pdb
+*.obj
+*.idb
+*.log

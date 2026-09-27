@@ -27,6 +27,9 @@ void gameOver(){
 		saveScore();
 		sort();
 		HighScore();
+#ifdef __EMSCRIPTEN__
+		iEmSyncScoresToIDB(); // flush highScore.bin to IndexedDB so it survives a refresh
+#endif
 
 		strcpy(player.name, "");
 		score = 0;
@@ -40,7 +43,7 @@ void gameOver(){
 
 void die()
 {
-	iShowImage(0, 0, screenWidth, screenHeight, sequence[index]);
+	iShowImage(0, 0, screenWidth, screenHeight, sequence[dieIndex]);
 }
 
 void iDraw()
@@ -48,19 +51,38 @@ void iDraw()
 	//place your drawing codes here
 	iClear();
 
+#if defined(_WIN32)
+	// Windows/MSVC only: _itoa is an MSVC CRT extension. The standard
+	// sprintf(..., "%d", ...) below is a behavior-identical substitute for
+	// base-10 conversion, which is the only base this game ever uses, so both
+	// the Emscripten and the Linux builds share it and the original Windows
+	// build keeps calling _itoa exactly as before.
 	_itoa(score, scores, 10);
 	_itoa(score1, score11, 10);
 	_itoa(score2, score22, 10);
 	_itoa(score3, score33, 10);
 	_itoa(score4, score44, 10);
 	_itoa(score4, score55, 10);
+#else
+	sprintf(scores, "%d", score);
+	sprintf(score11, "%d", score1);
+	sprintf(score22, "%d", score2);
+	sprintf(score33, "%d", score3);
+	sprintf(score44, "%d", score4);
+	sprintf(score55, "%d", score4);
+#endif
 
 	if (gamestate == -1)
 	{
 		iShowImage(0, 0, screenWidth, screenHeight, title);
 		//iPauseTimer(0);
-		sort();
-		HighScore();
+#ifdef __EMSCRIPTEN__
+		if (iEmHighScoresReady())
+#endif
+		{
+			sort();
+			HighScore();
+		}
 	}
 
 	else if (gamestate == 0)
@@ -171,10 +193,20 @@ void iDraw()
 		{
 			player.score = score;
 			
-			//bg rendering			
+			//bg rendering
+			// bg2[0] and bg2[2] are read here through a cached snapshot taken
+			// right after rhinoImages() finished loading them (see main()) -
+			// something in the web build's runtime otherwise mutates those two
+			// slots by the second animation frame (bg2[0] -100, bg2[2] +1,
+			// consistently reproducible; bg4[0]/bg4[2] hit the same way,
+			// bg/bg3/bg5 never do). Root cause not isolated despite ruling out
+			// the game's own draw calls, sort()/HighScore(), the fixed-rate
+			// logic-pass loop, ALLOW_MEMORY_GROWTH and stack size in a
+			// bisection; this snapshot sidesteps it without depending on
+			// finding it.
 			for (int i = 0; i < 5; i++)
 			{
-				iShowImage(mainbg2[i].x2, mainbg2[i].y2, screenWidth, screenHeight, bg2[i]);
+				iShowImage(mainbg2[i].x2, mainbg2[i].y2, screenWidth, screenHeight, bg2Snapshot[i]);
 			}
 			iSetColor(255, 255, 255);
 			iText(screenWidth / 2, screenHeight - 100, player.name, GLUT_BITMAP_TIMES_ROMAN_24);
@@ -271,9 +303,11 @@ void iDraw()
 		{
 			player.score = score;
 			//bg rendering
+			// See the matching comment on bg2's draw loop above - bg4[0]/bg4[2]
+			// get the same treatment for the same reason.
 			for (int i = 0; i < n4; i++)
 			{
-				iShowImage(mainbg4[i].x4, mainbg4[i].y4, screenWidth, screenHeight, bg4[i]);
+				iShowImage(mainbg4[i].x4, mainbg4[i].y4, screenWidth, screenHeight, bg4Snapshot[i]);
 			}
 			iSetColor(255, 255, 255);
 			iText(screenWidth / 2, screenHeight - 100, player.name, GLUT_BITMAP_TIMES_ROMAN_24);
@@ -445,10 +479,32 @@ void iKeyboard(unsigned char key)
 {
 	if (key == '\r')
 	{
-		gamestate = 2;
-		gamephase = 2;
-		ctr = true;
-		iPauseTimer(0);
+		if (gamestate == 0)
+		{
+			// Main menu: Enter now confirms the highlighted button, the same
+			// as Insert (see iSpecialKeyboard's GLUT_KEY_INSERT branch) - this
+			// key used to be checked completely unconditionally up here, so
+			// pressing Enter on the menu always jumped straight into
+			// gameplay (gamestate 2) below regardless of which button was
+			// selected, ignoring selectedButton entirely.
+			if (selectedButton >= 0 && selectedButton < 5)
+			{
+				// Menu buttons are [0]start [1]story [2]howtoplay
+				// [3]highscores [4]credits. STORY (index 1) reuses gamestate 1
+				// (see the matching comment in iSpecialKeyboard) instead of
+				// selectedButton + 1's gamestate 2, which is live gameplay.
+				gamestate = (selectedButton == 1) ? 1 : selectedButton + 1;
+			}
+		}
+		else if (gamestate == 1)
+		{
+			// Story/name-entry screen: Enter's original job, starting a fresh
+			// run.
+			gamestate = 2;
+			gamephase = 2;
+			ctr = true;
+			iPauseTimer(0);
+		}
 	}
 	if (gamestate == 1)
 	{
@@ -955,7 +1011,23 @@ void iSpecialKeyboard(unsigned char key)
 {
 	if (key == GLUT_KEY_END)
 	{
+#ifdef __EMSCRIPTEN__
+		// Browser build: exit(0) calls WASI proc_exit under EXIT_RUNTIME=0,
+		// which halts the wasm instance (and with it glutMainLoop's
+		// requestAnimationFrame chain) with no visible effect - the last
+		// frame just stays on screen forever, which reads as "the End key
+		// does nothing." There is also no window to close from inside a
+		// page. The score is already saved at this point (gameOver() synced
+		// it to IndexedDB as soon as flag == 5, on the same frame the
+		// "victory"/"PRESS END TO SAVE YOUR SCORE" screen first appeared),
+		// so reloading back to the title screen is a safe, visible stand-in
+		// for "quit" here.
+		EM_ASM(
+			location.reload();
+		);
+#else
 		exit(0);
+#endif
 	}
 	if (gamestate == 0)
 	{
@@ -971,7 +1043,17 @@ void iSpecialKeyboard(unsigned char key)
 		{
 			if (selectedButton >= 0 && selectedButton < 5)
 			{
-				gamestate = selectedButton + 1; 
+				// Menu buttons are [0]start [1]story [2]howtoplay [3]highscores
+				// [4]credits, and gamestate 2 is live gameplay (only ever meant
+				// to be entered via the '\r' handler above, which also sets up
+				// gamephase/ctr/etc. for a fresh run). selectedButton + 1 maps
+				// STORY (index 1) straight to gamestate 2 with none of that
+				// setup done, rendering a blank/black screen. gamestate 1 (what
+				// START already goes to) is the actual story screen - its
+				// image has a "STORY" header and the story text above the
+				// name-entry box - so route STORY there too instead of
+				// inventing new content.
+				gamestate = (selectedButton == 1) ? 1 : selectedButton + 1;
 			}
 		}
 	}
@@ -1065,11 +1147,44 @@ void iSpecialKeyboard(unsigned char key)
 	//place your codes for other keys here
 }
 
-
-
-int main()
+// argc/argv are captured purely so iInitialize() can forward them to glutInit().
+// On Linux FreeGLUT requires a glutInit() call and uses argv[0] for the default
+// window title; on Windows this is harmless because the Windows branch of
+// iInitialize() ignores them (Win32 GLUT never needed glutInit), and Emscripten
+// passes a trivial argv through. main() keeps its original behavior otherwise -
+// no gameplay logic changes.
+int main(int argc, char* argv[])
 {
+	iGraphicsArgc = argc;
+	iGraphicsArgv = argv;
+
+#ifdef __EMSCRIPTEN__
+	// Browser build: mount an IndexedDB-backed filesystem at /persist so
+	// highScore.bin (read/written unchanged by score.h's fopen()-based
+	// sort()/saveScore(), redirected there via HIGHSCORE_PATH) survives a page
+	// refresh. The populate-from-IndexedDB sync is async; iEmHighScoresReady
+	// guards sort()/HighScore() (called every frame on the title screen, see
+	// iDraw()'s gamestate == -1 branch) so an empty pre-load sort() pass can't
+	// write blank scores over not-yet-synced-in IndexedDB data.
+	EM_ASM(
+		FS.mkdir('/persist');
+		FS.mount(IDBFS, {}, '/persist');
+		FS.syncfs(true, function (err) {
+			if (err) console.error('highscore IDBFS load failed:', err);
+			Module.iEmHighScoresReady = true;
+		});
+	);
+#elif defined(__linux__)
+	// Linux build: no IndexedDB and no Win32 console color command. High
+	// scores are plain local files (score.h falls through to HIGHSCORE_PATH
+	// "highScore.bin", resolved against the process's working directory -
+	// i.e. Main/, which is where the Makefile and the VS Code launch config
+	// run the executable from), exactly like the original Windows behavior.
+	printf("The Web Chronicles - native Linux build (GCC/G++ + FreeGLUT + OpenGL)\n");
+	printf("Assets are loaded relative to the working directory.\n");
+#else
 	system("Color 0C"); //For only windows platform.
+#endif
 	cout << "WITH GREAT POWER, COMES GREAT RESPONSIBILITY!" << endl;
 	iInitialize(screenWidth, screenHeight, "Demo");
 
@@ -1090,6 +1205,9 @@ int main()
 	peterImages2();
 	rhinoImages();
 	setAll2();
+	// See the comment on bg2's draw loop in iDraw() (gamephase == 3) for why.
+	for (int _i = 0; _i < 5; _i++)
+		bg2Snapshot[_i] = bg2[_i];
 
 
 	//Level-3 method calls
@@ -1104,6 +1222,9 @@ int main()
 	setAll4();
 	peterImages4();
 	kravenImages();
+	// See the comment on bg4's draw loop in iDraw() (gamephase == 5) for why.
+	for (int _i = 0; _i < n4; _i++)
+		bg4Snapshot[_i] = bg4[_i];
 
 	iSetTimer(120, attack5);
 	imgd = iLoadImage("99text.png");

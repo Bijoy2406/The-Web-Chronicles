@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>The Web Chronicles</title>
+<meta name="description" content="A Spider-Man inspired 2D action game, ported from C++ to WebAssembly.">
+<style>
+  :root {
+    --bg: #0b0b12;
+    --panel: #15151f;
+    --accent: #e23636; /* spidey red */
+    --accent2: #1b3fa0; /* spidey blue */
+    --text: #eee;
+    --muted: #9a9aa8;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    overflow-x: hidden;
+  }
+  .wrap {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 24px 16px 48px;
+  }
+  header.page-head {
+    text-align: center;
+    margin-bottom: 18px;
+  }
+  header.page-head h1 {
+    font-size: clamp(24px, 5vw, 40px);
+    margin: 0 0 6px;
+    letter-spacing: 1px;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  header.page-head p { color: var(--muted); margin: 0; }
+
+  .stage {
+    position: relative;
+    width: 100%;
+    background: #000;
+    border: 2px solid #2a2a3a;
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 10px 40px rgba(0,0,0,.5);
+  }
+  .stage-inner {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1600 / 700;
+    background: #000;
+    overflow: hidden;
+  }
+  /*
+   * IMPORTANT (Emscripten/GLUT interaction): the canvas element keeps its real
+   * width/height at the game's native 1600x700 resolution at all times.
+   * Emscripten's GLUT emulation (GLUT.onResize, see libglut.js) forces the
+   * canvas's backing-store width/height to match canvas.clientWidth/clientHeight
+   * on every browser resize event; if we let CSS shrink the canvas's own box
+   * (e.g. width:100%), GLUT would shrink the actual framebuffer to match,
+   * desyncing it from the fixed 1600x700 viewport/ortho projection the game set
+   * up once at iInitialize() and never re-establishes (no glutReshapeFunc is
+   * registered) — the result is nothing visible being drawn where you look for
+   * it. Instead, the canvas's LAYOUT size is pinned to 1600x700 via absolute
+   * positioning + explicit pixel dimensions, and #js-scale-wrap (sized purely
+   * by JS to fit the responsive .stage-inner box) applies a CSS `transform:
+   * scale()` around it. transform never affects clientWidth/clientHeight, so
+   * GLUT always sees the native resolution no matter how small/large the page
+   * displays the game.
+   */
+  #js-scale-wrap {
+    position: absolute;
+    top: 0; left: 0;
+    width: 1600px;
+    height: 700px;
+    transform-origin: top left;
+  }
+  #canvas {
+    display: block;
+    width: 1600px;
+    height: 700px;
+    outline: none;
+    image-rendering: -webkit-optimize-contrast;
+  }
+  /* In fullscreen, .stage-inner itself is the fullscreen element and fills the
+     screen; rescaleCanvas() (JS) recomputes the transform against
+     window.innerWidth/innerHeight to fit it, so no extra fullscreen-specific
+     CSS is needed here beyond stage-inner filling the fullscreen viewport. */
+  .stage-inner:fullscreen,
+  .stage-inner:-webkit-full-screen {
+    width: 100vw;
+    height: 100vh;
+    background: #000;
+  }
+
+  #loading-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    background: #05050a;
+    z-index: 5;
+    transition: opacity .35s ease;
+  }
+  #loading-overlay.hidden { opacity: 0; pointer-events: none; }
+  #loading-title { font-size: 18px; letter-spacing: .5px; color: var(--text); }
+  #loading-bar-track {
+    width: min(70%, 420px);
+    height: 14px;
+    background: #1c1c28;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid #2f2f42;
+  }
+  #loading-bar-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    transition: width .15s ease;
+  }
+  #loading-pct { color: var(--muted); font-size: 13px; }
+  #loading-error {
+    display: none;
+    max-width: 80%;
+    color: #ff8a8a;
+    text-align: center;
+    font-size: 14px;
+    white-space: pre-wrap;
+  }
+
+  .toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: center;
+    margin: 14px 0;
+  }
+  button.btn, a.btn {
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid #2f2f42;
+    padding: 10px 18px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    text-decoration: none;
+    transition: border-color .15s ease, background .15s ease;
+  }
+  button.btn:hover, a.btn:hover { border-color: var(--accent); background: #1b1b28; }
+
+  .controls {
+    margin-top: 24px;
+    background: var(--panel);
+    border: 1px solid #2a2a3a;
+    border-radius: 10px;
+    padding: 18px 20px;
+  }
+  .controls h2 { margin: 0 0 12px; font-size: 16px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+  .controls-sub { margin: 20px 0 4px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; border-top: 1px solid #2a2a3a; padding-top: 16px; }
+  .keys {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 10px 20px;
+  }
+  .keys div { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; }
+  .keys kbd {
+    background: #23233333;
+    border: 1px solid #3a3a4e;
+    border-bottom-width: 2px;
+    border-radius: 5px;
+    padding: 2px 8px;
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--text);
+  }
+  .keys span.action { color: var(--muted); }
+
+  .note {
+    margin-top: 14px;
+    font-size: 12px;
+    color: var(--muted);
+    text-align: center;
+  }
+
+  .hero-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 14px;
+    font-size: 13px;
+  }
+  .hero-table th {
+    text-align: left;
+    color: var(--muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-size: 11px;
+    padding: 0 8px 8px;
+    border-bottom: 1px solid #2a2a3a;
+  }
+  .hero-table td {
+    padding: 8px;
+    border-bottom: 1px solid #22222e;
+    white-space: nowrap;
+    color: var(--text);
+  }
+  .hero-table td:first-child { color: var(--text); font-weight: 600; }
+  .hero-table tr:last-child td { border-bottom: none; }
+  .hero-table kbd {
+    background: #23233333;
+    border: 1px solid #3a3a4e;
+    border-bottom-width: 2px;
+    border-radius: 5px;
+    padding: 2px 7px;
+    font-family: inherit;
+    font-size: 12px;
+    color: var(--text);
+    margin-right: 4px;
+  }
+  .hero-sub { color: var(--muted); font-weight: 400; font-size: 11px; }
+
+  .table-scroll { overflow-x: auto; margin-top: 14px; }
+  .table-scroll .hero-table { margin-top: 0; min-width: 480px; }
+
+  @media (max-width: 640px) {
+    .hero-table { font-size: 12px; }
+    .hero-table td { padding: 6px 8px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="page-head">
+    <h1>🕸️ The Web Chronicles</h1>
+    <p>"With great power, comes great responsibility." &mdash; ported from the original C++/OpenGL game via WebAssembly.</p>
+  </header>
+
+  <div class="stage">
+    <div class="stage-inner" id="stage-inner">
+      <div id="js-scale-wrap">
+        <canvas id="canvas" tabindex="-1" width="1600" height="700" oncontextmenu="event.preventDefault()"></canvas>
+      </div>
+      <div id="loading-overlay">
+        <div id="loading-title">Loading The Web Chronicles&hellip;</div>
+        <div id="loading-bar-track"><div id="loading-bar-fill"></div></div>
+        <div id="loading-pct">0%</div>
+        <div id="loading-error"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <button class="btn" id="fullscreen-btn">⛶ Fullscreen</button>
+    <button class="btn" id="focus-btn">🎮 Click to focus game</button>
+    <a class="btn" href="/">← Back to Portfolio</a>
+  </div>
+
+  <div class="controls">
+    <h2>Controls</h2>
+    <div class="keys">
+      <div><kbd>A</kbd> / <kbd>D</kbd><span class="action">Move</span></div>
+      <div><kbd>Space</kbd><span class="action">Jump</span></div>
+      <div><kbd>1</kbd><span class="action">Punch</span></div>
+      <div><kbd>2</kbd><span class="action">Kick</span></div>
+      <div><kbd>3</kbd><span class="action">Ultimate</span></div>
+      <div><kbd>4</kbd><span class="action">Block</span></div>
+      <div><kbd>X</kbd><span class="action">Fire</span></div>
+      <div><kbd>Enter</kbd><span class="action">Start / Confirm</span></div>
+      <div><kbd>Z</kbd><span class="action">Menu</span></div>
+      <div><kbd>Insert</kbd><span class="action">Select</span></div>
+      <div><kbd>↑</kbd> / <kbd>↓</kbd><span class="action">Navigate menu</span></div>
+    </div>
+    <h3 class="controls-sub">Boss (Player 2)</h3>
+    <p class="note">Every boss fight is local 2-player: the boss doesn't move or attack on its own &mdash; a second person drives it on the same keyboard. <kbd>←</kbd> / <kbd>→</kbd> moves the boss and <kbd>↑</kbd> jumps, in every fight; the attack keys below change per character.</p>
+
+    <div class="table-scroll">
+      <table class="hero-table">
+        <thead>
+          <tr><th>Hero</th><th colspan="6">Attacks</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Peter <span class="hero-sub">(Player 1)</span></td>
+            <td><kbd>1</kbd> Punch</td><td><kbd>2</kbd> Kick</td><td><kbd>3</kbd> Ult</td><td><kbd>4</kbd> Block</td><td></td><td></td>
+          </tr>
+          <tr>
+            <td>Miles <span class="hero-sub">(Player 1)</span></td>
+            <td><kbd>1</kbd> Punch</td><td><kbd>2</kbd> Kick</td><td><kbd>3</kbd> Ult</td><td><kbd>4</kbd> Block</td><td></td><td></td>
+          </tr>
+          <tr>
+            <td>2099 <span class="hero-sub">(Player 1)</span></td>
+            <td><kbd>1</kbd> Punch</td><td><kbd>2</kbd> Kick</td><td><kbd>3</kbd> Ult</td><td><kbd>4</kbd> Block</td><td><kbd>5</kbd> Call Peter</td><td><kbd>6</kbd> Call Miles</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="table-scroll">
+      <table class="hero-table">
+        <thead>
+          <tr><th>Boss</th><th colspan="6">Attacks</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Rhino</td>
+            <td><kbd>8</kbd> Punch</td><td><kbd>9</kbd> Kick</td><td><kbd>0</kbd> Ult</td><td></td><td></td><td></td>
+          </tr>
+          <tr>
+            <td>Kraven</td>
+            <td><kbd>8</kbd> Punch</td><td><kbd>9</kbd> Kick</td><td><kbd>0</kbd> Ult</td><td></td><td></td><td></td>
+          </tr>
+          <tr>
+            <td>Dr. Doom</td>
+            <td><kbd>7</kbd> Punch</td><td><kbd>8</kbd> Kick</td><td><kbd>9</kbd> Ult 1</td><td><kbd>0</kbd> Ult 2</td><td></td><td></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="note">Desktop keyboard required &middot; Chrome / Firefox / Edge recommended &middot; click the game once to give it keyboard focus.</p>
+  </div>
+</div>
+
+<script>
+  var canvas = document.getElementById('canvas');
+  var overlay = document.getElementById('loading-overlay');
+  var barFill = document.getElementById('loading-bar-fill');
+  var pctLabel = document.getElementById('loading-pct');
+  var errorBox = document.getElementById('loading-error');
+  var stageInner = document.getElementById('stage-inner');
+  var scaleWrap = document.getElementById('js-scale-wrap');
+
+  // Visually fit the fixed 1600x700 canvas into whatever size .stage-inner
+  // actually has (responsive width, or the fullscreen viewport) using a CSS
+  // transform, which does NOT change canvas.clientWidth/clientHeight — see the
+  // long comment on #js-scale-wrap in <style> for why that distinction matters
+  // to Emscripten's GLUT emulation.
+  function rescaleCanvas() {
+    var targetW = document.fullscreenElement || document.webkitFullscreenElement
+      ? window.innerWidth : stageInner.clientWidth;
+    var targetH = document.fullscreenElement || document.webkitFullscreenElement
+      ? window.innerHeight : stageInner.clientHeight;
+    var scale = Math.min(targetW / 1600, targetH / 700);
+    scaleWrap.style.transform = 'scale(' + scale + ')';
+    // Center within the available box.
+    var offsetX = (targetW - 1600 * scale) / 2;
+    var offsetY = (targetH - 700 * scale) / 2;
+    scaleWrap.style.left = offsetX + 'px';
+    scaleWrap.style.top = offsetY + 'px';
+  }
+  window.addEventListener('resize', rescaleCanvas);
+  document.addEventListener('fullscreenchange', rescaleCanvas);
+  document.addEventListener('webkitfullscreenchange', rescaleCanvas);
+  rescaleCanvas();
+
+  function showFatalError(msg, technical) {
+    document.getElementById('loading-title').textContent = 'Could not load the game';
+    errorBox.style.display = 'block';
+    errorBox.textContent = msg;
+    barFill.style.width = '0%';
+    pctLabel.textContent = '';
+    if (technical) console.error('[WebChronicles]', technical);
+  }
+
+  // Prevent the browser from scrolling the page when the canvas has focus
+  // and the game reads arrows/space/insert (Phase 9: canvas-focused input only).
+  var gameKeys = new Set([' ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Insert', 'Enter']);
+  window.addEventListener('keydown', function (e) {
+    if (document.activeElement === canvas && gameKeys.has(e.key)) {
+      e.preventDefault();
+    }
+  }, { passive: false });
+
+  canvas.addEventListener('click', function () { canvas.focus(); });
+  document.getElementById('focus-btn').addEventListener('click', function () { canvas.focus(); });
+
+  document.getElementById('fullscreen-btn').addEventListener('click', function () {
+    if (stageInner.requestFullscreen) stageInner.requestFullscreen();
+    else if (stageInner.webkitRequestFullscreen) stageInner.webkitRequestFullscreen();
+  });
+
+  var Module = {
+    canvas: canvas,
+    print: function (text) { console.log('[game]', text); },
+    printErr: function (text) { console.error('[game]', text); },
+    setStatus: function (text) {
+      // Emscripten calls this during startup/run with progress strings like
+      // "Downloading data..." and "" when ready.
+      if (!text) return;
+      var m = text.match(/([\d]+)\%\)/) || text.match(/\((\d+)\/(\d+)\)/);
+      if (m) {
+        var pct;
+        if (m.length === 3) pct = Math.round((parseInt(m[1], 10) / parseInt(m[2], 10)) * 100);
+        else pct = parseInt(m[1], 10);
+        barFill.style.width = pct + '%';
+        pctLabel.textContent = pct + '%';
+      }
+      document.getElementById('loading-title').textContent = text;
+    },
+    totalDependencies: 0,
+    monitorRunDependencies: function (left) {
+      this.totalDependencies = Math.max(this.totalDependencies, left);
+      var pct = this.totalDependencies > 0
+        ? Math.round(((this.totalDependencies - left) / this.totalDependencies) * 100)
+        : 0;
+      barFill.style.width = pct + '%';
+      pctLabel.textContent = pct + '%';
+      if (left === 0) {
+        document.getElementById('loading-title').textContent = 'Starting…';
+      }
+    },
+    onRuntimeInitialized: function () {
+      barFill.style.width = '100%';
+      pctLabel.textContent = '100%';
+      window.__gameReady = true; // polled by automated tests; harmless in normal use
+      setTimeout(function () {
+        overlay.classList.add('hidden');
+        canvas.focus();
+      }, 250);
+    },
+    onAbort: function (what) {
+      window.__gameError = String(what);
+      showFatalError(
+        'The WebAssembly game could not be initialized. Please try Chrome, Firefox, or Edge, or refresh the page.',
+        what
+      );
+    }
+  };
+  window.Module = Module;
+
+  window.addEventListener('error', function (e) {
+    if (e && e.message && /wasm|memory access out of bounds|abort/i.test(e.message)) {
+      window.__gameError = e.message;
+      showFatalError('The game crashed unexpectedly. Please refresh the page.', e.message);
+    }
+  });
+</script>
+<script src="game.js" onerror="showFatalError('Failed to load game.js — check your connection and refresh.', 'script load error')"></script>
+</body>
+</html>

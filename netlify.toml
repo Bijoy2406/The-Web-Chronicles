@@ -1,0 +1,39 @@
+# No [build.command]: game.js/game.wasm/game.data in web/dist are committed
+# pre-built (Netlify's Linux build image has no emsdk toolchain to compile
+# them from Main/iMain.cpp). Rebuild locally with build-web.sh and commit
+# the result whenever the game source changes.
+[build]
+  command = ""
+  publish = "web/dist"
+
+[[redirects]]
+  from = "/game"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/game/*"
+  to = "/index.html"
+  status = 200
+
+# Short cache + revalidate, not a long immutable cache: game.js/wasm/data
+# keep the same filenames across every deploy (no content hash), so a long
+# immutable Cache-Control would hide future updates from returning visitors'
+# browsers for up to a year. must-revalidate makes the browser check with
+# Netlify's CDN (a fast 304 if unchanged) instead of trusting a stale copy.
+[[headers]]
+  for = "/*.wasm"
+  [headers.values]
+    Content-Type = "application/wasm"
+    Cache-Control = "public, max-age=3600, must-revalidate"
+
+[[headers]]
+  for = "/*.data"
+  [headers.values]
+    Content-Type = "application/octet-stream"
+    Cache-Control = "public, max-age=3600, must-revalidate"
+
+[[headers]]
+  for = "/*.js"
+  [headers.values]
+    Cache-Control = "public, max-age=3600, must-revalidate"

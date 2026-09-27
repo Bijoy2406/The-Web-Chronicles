@@ -1,0 +1,54 @@
+{
+    // The Web Chronicles - native Linux (GCC/G++ + FreeGLUT + OpenGL) build.
+    //
+    // F5 runs the "Debug native Linux game (F5)" launch configuration below,
+    // which (a) builds Main/TheWebChronicles with the Makefile, (b) runs it with
+    // the working directory set to Main/ so every relative asset path resolves,
+    // and (c) attaches GDB for C++ debugging (verified: gdb 17.1 is installed).
+    //
+    // This does not affect the Windows (Main.sln) or Web (build-web.sh) targets.
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "build linux (make)",
+            "type": "shell",
+            "command": "make",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [ "$gcc" ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true
+            }
+        },
+        {
+            "label": "run linux game",
+            "type": "shell",
+            "command": "cd Main && ./TheWebChronicles",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "dependsOn": [ "build linux (make)" ],
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            }
+        },
+        {
+            "label": "clean linux build",
+            "type": "shell",
+            "command": "make clean",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": []
+        }
+    ]
+}

@@ -1,3 +1,31 @@
+#ifdef __EMSCRIPTEN__
+	#include <emscripten.h>
+	// Browser build: high scores persist via Emscripten's IDBFS (IndexedDB-backed
+	// filesystem) mounted at /persist (see main() in iMain.cpp). HIGHSCORE_PATH
+	// redirects the existing fopen() calls in sort()/saveScore() below to that
+	// mount instead of the preloaded (read-only-in-practice) asset root, without
+	// changing any of their read/write/sort logic. iEmSyncScoresToIDB() flushes
+	// writes to IndexedDB so a saved score survives a page refresh; called once
+	// after every saveScore()+sort() pass (see gameOver() in iMain.cpp).
+	#define HIGHSCORE_PATH "/persist/highScore.bin"
+	void iEmSyncScoresToIDB()
+	{
+		EM_ASM(
+			FS.syncfs(false, function (err) {
+				if (err) console.error('highscore IDBFS sync failed:', err);
+			});
+		);
+	}
+	// true once the initial IndexedDB->MEMFS populate (kicked off in main())
+	// has completed; see the race-prevention note above.
+	bool iEmHighScoresReady()
+	{
+		return EM_ASM_INT({ return Module.iEmHighScoresReady ? 1 : 0; });
+	}
+#else
+	#define HIGHSCORE_PATH "highScore.bin"
+#endif
+
 struct scores
 {
 	char name[20];
@@ -20,7 +48,7 @@ void sort()
 {
 	int i = 0;
 	FILE *fp;
-	fp = fopen("highScore.bin", "rb");
+	fp = fopen(HIGHSCORE_PATH, "rb");
 	if (fp == NULL)
 	{
 		printf("file notfound\n");
@@ -31,7 +59,13 @@ void sort()
 			//cout << "call" << endl;
 		}
 	}
-	fclose(fp);
+	// fclose(NULL) happens to be a tolerated no-op on MSVC's CRT (which is why
+	// this worked unconditionally on Windows even on the fopen-failed path
+	// above), but it's undefined behavior in general and a hard crash under
+	// Emscripten's libc (null function-pointer dereference). Guarding it is a
+	// pure robustness fix with no effect on the already-valid-fp case.
+	if (fp != NULL)
+		fclose(fp);
 	int l = i;
 	for (i = 0; i < l - 1; i++) {
 		for (int j = 0; j < l - i - 1; j++) {
@@ -43,23 +77,26 @@ void sort()
 		}
 	}
 	FILE *dp;
-	dp = fopen("highScore.bin", "wb");
-	for (int i = 0; i < 5; i++){
-		fwrite(&s[i], sizeof(struct scores), 1, dp);
+	dp = fopen(HIGHSCORE_PATH, "wb");
+	if (dp != NULL)
+	{
+		for (int i = 0; i < 5; i++){
+			fwrite(&s[i], sizeof(struct scores), 1, dp);
+		}
+		fclose(dp);
 	}
-
-	fclose(dp);
 }
 void saveScore()
 {
 	strcpy(s[5].name, player.name);
 	s[5].score = player.score;
 	FILE *fp;
-	fp = fopen("highScore.bin", "ab");
+	fp = fopen(HIGHSCORE_PATH, "ab");
+	if (fp != NULL)
 	{
 		fwrite(&s[5], sizeof(struct scores), 2, fp);
+		fclose(fp);
 	}
-	fclose(fp);
 }
 void HighScore()
 {

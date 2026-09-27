@@ -7,6 +7,10 @@ int t2;
 #define bgSpeed2 5
 #define n2 5
 int bg2[n2];
+// Snapshot of bg2, taken right after rhinoImages() loads it (see main() in
+// iMain.cpp); the draw loop in iDraw() reads this instead of bg2 directly.
+// See the comment there for why.
+int bg2Snapshot[n2];
 struct background2
 {
 	int x2;
